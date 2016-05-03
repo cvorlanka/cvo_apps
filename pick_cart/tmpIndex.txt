@@ -1,0 +1,29 @@
+<div id="all_bins">	    
+    </div>
+
+	<!--
+     <div class="row mrg-top-20">
+        <div class="col-md-12">
+             <div class="col-md-3">
+                <div class="bin bin-off"> 
+                    <div>Bin off  </div>
+                </div>   
+            </div>
+            <div class="col-md-3">
+                <div class="bin bin-off"> 
+                    <div>Bin off  </div>
+                </div>   
+            </div>
+            <div class="col-md-3">
+                <div class="bin bin-off"> 
+                    <div>Bin off  </div>
+                </div>   
+            </div>
+             <div class="col-md-3">
+                <div class="bin bin-off"> 
+                    <div>Bin off  </div>
+                </div>   
+            </div>
+        </div>
+    </div>
+	-->

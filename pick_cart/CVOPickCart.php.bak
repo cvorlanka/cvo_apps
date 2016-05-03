@@ -1,0 +1,556 @@
+<?php
+	ini_set('error_reporting', E_ALL);
+	class CVOPickCart
+	{
+		//Define Variables
+		public $binData = array();		
+		
+
+		//Define Methods
+
+		public function __construct()
+		{		   
+			$this->binData['FLAG']		= "off";
+			$this->binData['LABEL']		= "";
+			$this->binData['CONTENT']	= "";
+			$this->binData['SKIP']		= '<span class="skip f-left">skip <i class="fa fa-share"></i></span>';
+			$this->binData['REMOVE']	= '<span class="delete f-right">remove <i class="fa fa-times"></i></span>';
+		}
+
+		function dbConn()
+		{
+			$dbHost	= "cvo-db-03";
+			$dbName	= "CVO";
+			$dbUser = "sa";
+			$dbPass = "sa12345";
+			$dbInfo	= array();
+			global $dbLink;
+			$dbInfo['Database']	= $dbName;
+			$dbInfo['UID']		= "sa";
+			$dbInfo['PWD']		= "sa12345";
+
+			$dbLink = odbc_connect("Driver={SQL Server};Server=$dbHost;Database=$dbName;", $dbUser, $dbPass) or die(odbc_error());
+			if(!$dbLink)
+			{
+				echo "Failure! Connection to SQL Server is not successful";
+				die(print_r(odbc_error(), true));
+			}
+			else
+			return $dbLink;
+		}
+
+		function initBins($dbLink, $user)
+		{
+			$query = "SELECT * FROM cvo_cart_scan_orders WHERE scan_user = '".$user."'";
+			//echo $query;
+			$result = odbc_exec($dbLink, $query);
+			if(odbc_num_rows($result) > 0)
+			{
+				$data = array();
+				while($row = odbc_fetch_array($result))
+				{
+					array_push($data, $row['order_no']);
+				}
+			}
+
+			$i = 1;
+			$binStr = '<div class="row mrg-top-20">
+							<div class="col-md-12">';
+			while($i<=8)
+			{		
+				$binID		= "bin".$i;
+				$binLabel	= "label".$i;
+				$binContent	= "content".$i;
+				$binActions	= "actions".$i;
+				$binSkip	= "skip".$i;
+				$binRemove	= "remove".$i;				
+
+				$dataIndex = $i-1;
+
+				$binStr .= '<div class="col-md-3" id="'.$binID.'">
+					<div class="bin bin-'.(isset($data[$dataIndex]) ? "wait" : "off").'">
+						<div id="'.$binLabel.'">'.(isset($data[$dataIndex]) ? $data[$dataIndex] : "").'</div>
+						<div id="'.$binContent.'"></div>
+					</div>						
+					<div class="bin-action"  id="'.$binActions.'">
+						<div id="'.$binSkip.'">'.(isset($data[$dataIndex]) ? '<span class="skip f-left"></span>' : "").'</div>
+						<div id="'.$binRemove.'">'.(isset($data[$dataIndex]) ? '<span class="delete f-right"><a href="javascript:removeOrder(\''.$data[$dataIndex].'\', \''.$i.'\');">remove <i class="fa fa-times"></i></a></span>' : "").'</div>
+					</div>
+				</div>';
+				/*
+				<a href="javascript:skipOrder(\''.$data[$dataIndex].'\', \''.$i.'\');">skip <i class="fa fa-share"></i></a>
+				*/
+				if($i%4 == 0)
+					$binStr .= '</div></div>';						
+						
+				$i++;
+			}
+			//$binStr .= '</div></div>';
+			echo $binStr;
+		}
+		
+		function reloadBin($box, $binNo, $order, $content, $flag)
+		{
+			$this->binData['LABEL']		= $order;
+			$this->binData['CONTENT']	= "<span class='count blink'>".$content."</span>";
+			$this->binData['FLAG']		= $flag;
+			$this->binData['SKIP']		= '<span class="skip f-left"><a href="javascript:skipOrder(\''.$order.'\', \''.$binNo.'\');">skip <i class="fa fa-share"></i></a></span>';
+			$this->binData['REMOVE']	= '<span class="delete f-right">remove <i class="fa fa-times"></i></span>';
+			$binLabel = "bin".$box;
+
+			$binContent = $this->divBin($box, $this->binData);
+			echo $binLabel.":::".$binContent;
+		}
+
+		function loadOrder($dbLink, $cart, $orderNo)
+		{
+			$idx = 1;
+			$query = "SELECT * FROM cvo_cart_scan_orders WHERE scan_user = '".$cart."'";
+			$result = odbc_exec($dbLink, $query);
+			$rows = odbc_num_rows($result);
+			if($rows > 0)
+				$idx = $rows + 1;				
+			
+			//Load Order
+			$orderBits = explode("-", $orderNo);
+			$order		= trim($orderBits[0]);
+			$orderExt	= trim($orderBits[1]);
+
+			//Build DIV
+			$binLabel = "bin".$idx;
+
+			if(!isset($orderExt) || ($orderExt == "")) $orderExt = 0;
+			$query = "{call cvo_pick_cart_process_sp(".$cart.", ".$order.", ".$orderExt.", 0)}";
+			if(odbc_exec($dbLink, $query))
+			{
+				$this->binData['LABEL']	= $orderNo;
+				$this->binData['FLAG']	= "wait";
+
+				$binContent = $this->divBin($idx, $this->binData);
+				echo $binLabel.":::".$binContent;
+			}
+		}
+
+		function disableBin($orderNo)
+		{
+			//Build DIV
+			$binLabel = "bin".$idx;
+
+			
+			$this->binData['LABEL']	= "";
+			$this->binData['FLAG']	= "off";
+			$this->binData['SKIP']	= "";
+			$this->binData['REMOVE']= "";
+
+			$binContent = $this->divBin($idx, $this->binData);
+			echo $binLabel.":::".$binContent;
+			
+		}
+
+		function skipOrder($dbLink, $order, $binNo, $box)
+		{
+			$query = "UPDATE cvo_cart_order_parts SET isSkipped = '1' WHERE order_no = '".$order."' AND bin_no = '".$binNo."'";
+			if(odbc_exec($dbLink, $query))
+			{
+				$this->ledOFF($box);
+				echo "ORDER_SKIPPED";
+			}
+		}
+
+		function skipBin($dbLink, $cartNo, $binNo, $box)
+		{
+			$idx = 1;
+			$query = "UPDATE cvo_cart_order_parts SET isSkipped = 1, updated = GETDATE() WHERE bin_no = '".$binNo."' AND user_login = '".$cartNo."'";
+			if(odbc_exec($dbLink, $query))
+			{
+				$this->ledOFF($box);
+				echo "SKIPPED";
+			}
+		}
+
+		function removeOrder($dbLink, $cart, $orderNo, $idx)
+		{
+			//Remove Order
+			$orderBits = explode("-", $orderNo);
+			$order		= trim($orderBits[0]);
+			$orderExt	= trim($orderBits[1]);
+
+			//Build DIV
+			$binLabel = "bin".$idx;
+
+			if(!isset($orderExt) || ($orderExt == "")) $orderExt = 0;
+			$query = "{call cvo_pick_cart_process_sp(".$cart.", ".$order.", ".$orderExt.", 99)}";
+			if(odbc_exec($dbLink, $query))
+			{
+				$this->binData['LABEL']	= "";
+				$this->binData['FLAG']	= "off";
+				$this->binData['SKIP']	= "";
+				$this->binData['REMOVE']= "";
+
+				$binContent = $this->divBin($idx, $this->binData);
+				echo $binLabel.":::".$binContent;
+			}
+		}
+
+		function disableSkip($idx)
+		{
+			$binLabel = "skip".$idx;
+			$this->binData['SKIP']		= "";
+			$binContent = $this->divSkip($idx, $this->binData);
+			echo $binLabel.":::".$binContent;
+		}
+
+		function disableRemove($idx)
+		{
+			$binLabel = "remove".$idx;
+			$this->binData['REMOVE']	= "";
+			$binContent = $this->divRemove($idx, $this->binData);
+			echo $binLabel.":::".$binContent;
+		}
+
+		function divBin($id)
+		{
+			$binContent = '		
+				<div class="bin bin-'.$this->binData['FLAG'].'">
+					<div id="label'.$id.'">'.$this->binData['LABEL'].'</div>
+					<div id="content'.$id.'">'.$this->binData['CONTENT'].'</div>
+				</div>						
+				<div class="bin-action"  id="actions'.$id.'">
+					<div id="skip'.$id.'">'.$this->binData['SKIP'].'</div>
+					<div id="remove'.$id.'">'.$this->binData['REMOVE'].'</div>
+				</div>			
+			';
+			return $binContent;
+		}
+
+		function divLabel()
+		{
+		}
+
+		function divContent()
+		{
+		}
+
+		function divSkip()
+		{
+			$binContent = '<div id="skip'.$id.'">'.$this->binData['SKIP'].'</div>';
+			return $binContent;
+		}
+
+		function divRemove()
+		{
+			$binContent = '<div id="remove'.$id.'">'.$this->binData['REMOVE'].'</div>';
+			return $binContent;
+		}
+
+		function assignOrderToBin()
+		{
+			
+		}
+
+		//============================================================================
+		//Optimize - To show Current / Total Picks and the Next Bin to pick from 
+		//============================================================================
+		function showPicks($dbLink, $cart)
+		{
+			$query = "SELECT TOP 1 op.bin_no FROM cvo_cart_order_parts op 
+			JOIN cvo_cart_scan_orders c ON (op.order_no = c.order_no) 
+			LEFT JOIN cvo_cart_bin_sort bs ON (LEFT(op.bin_no, 4) = bs.bin_row) 
+			
+			WHERE c.scan_user = '".$cart."' AND op.bin_group_code = 'PICKAREA' 
+			AND c.order_status NOT IN ('O', 'C') AND (op.isSkipped < 1 AND op.scanned <> op.qty_to_process)
+			ORDER BY bs.row_index ASC, op.bin_no ASC";
+			//echo $query;
+			$result = odbc_exec($dbLink, $query);
+			if(odbc_num_rows($result) > 0)
+			{
+				$row = odbc_fetch_array($result);
+
+				echo $row['bin_no'].':::'.'<div class="col-md-12">       
+					<div class="form-group">
+						<div class="col-md-2 text-right"><h2 class="h2bottom">Next Bin: </h2></div>   
+						<div class="col-md-10"><h2><span class="next_bin green">'.$row['bin_no'].'</span><span class="skip"><a href="javascript:skipBin(\''.$row['bin_no'].'\', \''.$cart.'\');">skip <i class="fa fa-share"></i></a></h2></div>
+					</div>     
+				</div>
+				<div class="col-md-12"> 
+					<hr>  
+				</div>';
+			}
+			else
+			{
+				echo 'NONE:::<div class="col-md-12">       
+					<div class="form-group">
+						<div class="col-md-2 text-right"><a type="button" role="button" class="btn btn-lg btn-success" href="javascript:completeCycle();">Complete</a></div>						
+					</div>     
+				</div>
+				<div class="col-md-12"> 
+					<hr>  
+				</div>';
+			}
+		}
+
+		/*
+		function showBinAllocation($dbLink, $cartNo, $binNo)
+		{
+			$query = "SELECT ROW_NUMBER() OVER (ORDER BY c.id) as IDX, c.id, c.order_no, op.upc_code, CONVERT(int, op.qty_to_process) as ITEM_QTY, op.scanned, op.isSkipped, 
+			CASE WHEN CONVERT(smallint, op.qty_to_process) = op.scanned THEN '1' ELSE '0' END AS order_complete
+			FROM cvo_cart_scan_orders c LEFT JOIN cvo_cart_order_parts op WITH (NOLOCK) ON 
+			(c.order_no = op.order_no AND c.scan_user = op.user_login  AND op.bin_no = '".$binNo."') 
+			WHERE c.scan_user = '".$cartNo."' 
+			ORDER BY c.id";
+			
+			$result = odbc_exec($dbLink, $query);
+			if(odbc_num_rows($result) > 0)
+			{
+				$divData = array();
+				$whichLED = 0;
+				$toPick = 0;
+				while($row = odbc_fetch_array($result))
+				{
+					if((isset($row['upc_code']) && ($row['upc_code']!="")) && ($row['order_complete'] != "1"))
+					{
+						if(($whichLED < 1) && ($row['isSkipped'] < 1))
+						{
+							$whichLED = $row['IDX'];
+							$toPick = $row['ITEM_QTY'];
+						}
+						array_push($divData, $row['IDX'].":".$row['ITEM_QTY'].":".$row['order_no'].":".$row['isSkipped'].":".$row['upc_code']);
+					}
+				}
+
+				//=================
+				//Turn ON the LED
+				//=================
+				if(isset($whichLED) && ($whichLED > 0))
+				{
+					$this->ledON($whichLED, $toPick);
+				}				
+				
+				if(sizeof($divData) > 0)
+				{
+					echo implode("___", $divData);
+				}
+				else echo "nothing";
+			}
+			else echo "nothing";
+		}
+		*/
+
+		function showBinAllocation($dbLink, $cartNo, $binNo)
+		{
+			$query = "SELECT ROW_NUMBER() OVER (ORDER BY c.id) as IDX, c.id, c.order_no, op.upc_code, CONVERT(int, op.qty_to_process) as ITEM_QTY, op.scanned, op.isSkipped, 
+			CASE WHEN CONVERT(smallint, op.qty_to_process) = op.scanned THEN '1' ELSE '0' END AS order_complete, 
+			CONVERT(int, (qty_to_process - scanned)) as TO_PICK 
+			FROM cvo_cart_scan_orders c LEFT JOIN cvo_cart_order_parts op WITH (NOLOCK) ON 
+			(c.order_no = op.order_no AND c.scan_user = op.user_login  AND op.bin_no = '".$binNo."') 
+			WHERE c.scan_user = '".$cartNo."' 
+			ORDER BY c.id";
+			
+			$result = odbc_exec($dbLink, $query);
+			if(odbc_num_rows($result) > 0)
+			{
+				$divData = array();
+				$whichLED = 0;
+				$toPick = 0;
+				while($row = odbc_fetch_array($result))
+				{
+					if((isset($row['upc_code']) && ($row['upc_code']!="")) && ($row['order_complete'] != "1"))
+					{
+						if(($whichLED < 1) && ($row['isSkipped'] < 1))
+						{
+							$whichLED = $row['IDX'];
+							$toPick = $row['TO_PICK'];
+						}
+						array_push($divData, $row['IDX'].":".$toPick.":".$row['order_no'].":".$row['isSkipped'].":".$row['upc_code']);
+					}
+				}
+
+				//=================
+				//Turn ON the LED
+				//=================
+				if(isset($whichLED) && ($whichLED > 0))
+				{
+					$this->ledON($whichLED, $toPick);
+				}				
+				
+				if(sizeof($divData) > 0)
+				{
+					echo implode("___", $divData);
+				}
+				else echo "nothing";
+			}
+			else echo "nothing";
+		}
+
+		function scanUPC($dbLink, $upc, $order, $binNo, $box)
+		{
+			$query = "UPDATE cvo_cart_order_parts SET scanned = scanned + 1, isSkipped = '0', updated = GETDATE() WHERE order_no = '".$order."' AND upc_code = '".$upc."'";
+			if(odbc_exec($dbLink, $query))
+			{
+				//=================
+				//Turn OFF the LED
+				//=================
+				$this->ledOFF($box);
+				echo "UPDATED";
+			}
+		}
+
+		function ledON($ledNo, $pickNum)
+		{
+			$ledNo .= "1";
+			if(isset($pickNum) && ($pickNum > 0))
+			{
+				//if($pickNum < 10)
+					$ledNo .= "_".$pickNum;
+				//else 
+					//$ledNo .= "_".$pickNum;
+			}
+			else
+			{
+				$ledNo .= "_0";
+			}
+			$service_url = 'http://10.1.10.38:8081/'.$ledNo;
+			//$service_url = 'http://192.168.1.10/'.$ledNo;
+			$curl = curl_init($service_url);
+			
+			$ship = array();
+			$ship['data'] = "ABC";
+			$shipJSON = json_encode($ship);
+			// Send cURL to Yun board
+			curl_setopt($curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 ); 
+			curl_setopt($curl, CURLOPT_CUSTOMREQUEST, "POST");                                                                     
+			curl_setopt($curl, CURLOPT_POSTFIELDS, $shipJSON);                                                                  
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);                                                                      
+			curl_setopt($curl, CURLOPT_HTTPHEADER, array(                                                                          
+				'Content-Type: application/json',                                                                                
+				'Content-Length: ' . strlen($shipJSON))                                                                       
+			);                                           
+			@curl_exec($curl);
+			curl_close($curl);
+		}
+
+		function ledOFF($ledNo)
+		{
+			$ledNo .= "0";
+			$ledNo .= "_0";
+			$service_url = 'http://10.1.10.38:8081/'.$ledNo;
+			//$service_url = 'http://192.168.1.10/'.$ledNo;
+			$curl = curl_init($service_url);
+			
+			$ship = array();
+			$ship['data'] = "ABC";
+			$shipJSON = json_encode($ship);
+			// Send cURL to Yun board
+			curl_setopt($curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 ); 
+			curl_setopt($curl, CURLOPT_CUSTOMREQUEST, "POST");                                                                     
+			curl_setopt($curl, CURLOPT_POSTFIELDS, $shipJSON);                                                                  
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);                                                                      
+			curl_setopt($curl, CURLOPT_HTTPHEADER, array(                                                                          
+				'Content-Type: application/json',                                                                                
+				'Content-Length: ' . strlen($shipJSON))                                                                       
+			);                                           
+			@curl_exec($curl);
+			curl_close($curl);
+		}
+
+		function resetLED()
+		{
+			$ledNo = "RSET";
+			$service_url = 'http://10.1.10.38:8081/'.$ledNo;
+			$curl = curl_init($service_url);
+			
+			$ship = array();
+			$ship['data'] = "ABC";
+			$shipJSON = json_encode($ship);
+			// Send cURL to Yun board
+			curl_setopt($curl, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4 ); 
+			curl_setopt($curl, CURLOPT_CUSTOMREQUEST, "POST");                                                                     
+			curl_setopt($curl, CURLOPT_POSTFIELDS, $shipJSON);                                                                  
+			curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);                                                  
+			curl_setopt($curl, CURLOPT_HTTPHEADER, array(                                                                          
+				'Content-Type: application/json',                                                                                
+				'Content-Length: ' . strlen($shipJSON))                                                                       
+			);                                           
+			@curl_exec($curl);
+			curl_close($curl);
+		}
+
+		function completeCycle($dbLink, $cartNo)
+		{
+			$query_get = "SELECT * FROM cvo_cart_scan_orders WHERE scan_user = '".$cartNo."'";
+			$result_get = odbc_exec($dbLink, $query_get);
+			if(odbc_num_rows($result_get) > 0)
+			{
+				$coData = array();
+				while($row_get = odbc_fetch_array($result_get))
+				{
+					$coData[$row_get['order_no']] = $row_get;
+				}
+			}
+
+			$status = array();
+
+			//First load the Parts
+			$query_load_parts = "INSERT INTO cvo_cart_parts_processed (tran_id, order_no, part_no, updated, user_login, bin_no, upc_code, qty_to_process, scanned, bin_group_code) SELECT tran_id, order_no, part_no, updated, user_login, bin_no, upc_code, qty_to_process, scanned, bin_group_code FROM cvo_cart_order_parts WHERE user_login = '".$cartNo."'";
+			//echo $query_load_parts;
+			if(odbc_exec($dbLink, $query_load_parts))
+			{
+				$status['LOADED_PARTS_PROCESSED'] = "DONE";
+
+				//$query_load_orders = "INSERT INTO cvo_cart_orders_processed (order_no, order_status, scan_date, scan_user) SELECT order_no, order_status, scan_date, scan_user FROM cvo_cart_scan_orders WHERE scan_user = '".$cartNo."'";
+
+				$pickSetID = md5(@date("YmdHis"));
+
+				$query_load_orders = "INSERT INTO cvo_cart_orders_processed (order_no, order_status, scan_date, scan_user, pick_set) SELECT order_no, order_status, scan_date, scan_user, '".$pickSetID."' FROM cvo_cart_scan_orders WHERE scan_user = '".$cartNo."'";
+
+				if(odbc_exec($dbLink, $query_load_orders))
+				{
+					$status['LOADED_ORDERS_PROCESSED'] = "DONE";
+
+					$query_update_processed = "UPDATE cvo_cart_orders_processed SET order_status = 'O' WHERE order_status <> 'C' AND scan_user = '".$cartNo."'";
+					if(odbc_exec($dbLink, $query_update_processed))
+					{
+						$status['MARKED_ORDER_STATUS_COMPLETE'] = "DONE";
+
+						//Now Truncate
+						$query_truncate_orders = "DELETE FROM cvo_cart_scan_orders WHERE scan_user = '".$cartNo."'";
+						if(odbc_exec($dbLink, $query_truncate_orders))
+							$status['TRUNCATED_ORDERS_TABLE'] = "DONE";
+
+						//================================================================
+						// Commenting this on 15 Jan 2016
+						//================================================================
+						$query_truncate_parts = "DELETE FROM cvo_cart_order_parts WHERE user_login = '".$cartNo."'";
+						if(odbc_exec($dbLink, $query_truncate_parts))
+							$status['TRUNCATED_PARTS_TABLE'] = "DONE";
+					}
+				}
+
+				//Trigger E-mail
+				$mailStr = 'Pick Cart #'.$cartNo.' - Orders Check-out: '.sizeof($coData).'<br><br>';
+				foreach($coData as $key => $value)
+					$mailStr .= "<br>".$key;
+
+				$mailStr .= "<br><br><u>Pre-checkout steps:</u><br>";
+				foreach($status as $stKey => $stValue)
+				{
+					$mailStr .= "<br> - ".$stValue." => ".$stKey;
+				}
+
+				$to      = "rlanka@cvoptical.com";
+				$subject = 'Pick Cart '.$cartNo.' - Checkout Notification';
+				$headers = 'From: helpdesk@cvoptical.com' . "\r\n" .
+				 'Reply-To: helpdesk@cvoptical.com' . "\r\n" .
+				 'X-Mailer: PHP/' . phpversion();		
+				$headers .= 'MIME-Version: 1.0' . "\r\n";
+				$headers .= 'Content-type: text/html; charset=iso-8859-1' . "\r\n";
+				//$headers .= 'Bcc: rlanka@cvoptical.com'. "\r\n";
+				ini_set ( "SMTP", "172.20.1.90" ); 
+				$isSent = mail($to, $subject, $mailStr, $headers);
+				if($isSent) echo "Done";
+			}
+			else echo "Issue";
+		}
+	}
+
+?>

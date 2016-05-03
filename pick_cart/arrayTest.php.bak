@@ -1,0 +1,28 @@
+<?php
+	header("Content-type: text/plain");
+
+	$str = "PHP Learning Arrays";
+	$arr = explode(" ", $str);
+	print_r($arr);
+
+	$data = array("First", "Second", "Third");
+	$strData = implode(":::", $data);
+	echo "\n\n".$strData;
+
+	if(in_array("Second", $data))
+		echo "\n\nFound";
+	
+
+	//Read data from file to array
+	$myData = file("data.txt");
+	$myDataArray = array();
+	foreach($myData as $idx => $line)
+	{
+		$bits = explode("\t", $line);
+		$key = trim($bits[0]);
+		$value = trim($bits[1]);
+
+		$myDataArray[$key] = $value;
+	}
+	print_r($myDataArray);
+?>
